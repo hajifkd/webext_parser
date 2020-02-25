@@ -4,7 +4,7 @@ extern crate scraper;
 pub mod api;
 pub(crate) mod util;
 
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use std::convert::TryFrom;
 
 pub async fn api_pages() -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
@@ -53,7 +53,7 @@ fn parse_type(type_div: &scraper::ElementRef) -> Result<api::Type, String> {
         .inner_html()
         .trim()
         .to_owned();
-    let type_selector = Selector::parse("th").unwrap();
+    let type_selector = Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr > th"#).unwrap();
     let type_type = {
         if let Some(th) = type_div.select(&type_selector).next() {
             th.inner_html()
@@ -66,46 +66,53 @@ fn parse_type(type_div: &scraper::ElementRef) -> Result<api::Type, String> {
     match type_type {
         "Enum" => Ok(api::Type::new_enum(name)),
         "properties" => {
-            let properties_selector = Selector::parse(r#"tr[id^="property-"]"#).unwrap();
+            let properties_selector =
+                Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr[id^="property-"]"#)
+                    .unwrap();
             let mut properties = vec![];
             let mut optional_properties = vec![];
-            let td_selector = Selector::parse("td").unwrap();
             for tr in type_div.select(&properties_selector) {
-                let mut tds = tr.select(&td_selector);
-                let prop_type = tds
-                    .next()
-                    .unwrap()
+                let tds = tr
+                    .children()
+                    .filter_map(ElementRef::wrap)
+                    .collect::<Vec<_>>();
+
+                if tds.len() != 3 {
+                    return Err(format!("Children tds: {} (must be 3)", tds.len()));
+                }
+
+                let prop_type = tds[0]
                     .text()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
                     .join(" ");
-                let prop_td = tds.next().unwrap();
+                let prop_td = tds[1];
 
                 if prop_td
                     .select(&Selector::parse("span.optional").unwrap())
                     .count()
                     == 1
                 {
-                    optional_properties.push(api::Property {
-                        type_name: prop_type,
-                        name: prop_td
+                    optional_properties.push(api::Property::new(
+                        prop_type,
+                        prop_td
                             .text()
                             .nth(1)
                             .ok_or("Invalid structure")?
                             .trim()
                             .to_owned(),
-                    })
+                    ));
                 } else {
-                    properties.push(api::Property {
-                        type_name: prop_type,
-                        name: prop_td
+                    properties.push(api::Property::new(
+                        prop_type,
+                        prop_td
                             .text()
                             .next()
                             .ok_or("Invalid structure")?
                             .trim()
                             .to_owned(),
-                    })
+                    ));
                 }
             }
             Ok(api::Type::new_struct(name, properties, optional_properties))

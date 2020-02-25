@@ -22,20 +22,67 @@ impl std::convert::TryFrom<&str> for ApiType {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Property {
-    pub type_name: String,
-    pub name: String,
+    type_name: String,
+    is_array: bool,
+    name: String,
+}
+
+impl Property {
+    pub fn new(type_name: String, name: String) -> Self {
+        let type_info: Vec<_> = type_name.split(" ").collect();
+
+        if name.contains(" ") {
+            dbg!(&type_name);
+            panic!("invalid name");
+        }
+
+        if type_info.len() == 1 {
+            Property {
+                type_name: type_name,
+                is_array: false,
+                name,
+            }
+        } else if type_info.len() == 3 && type_info[0] == "array" && type_info[1] == "of" {
+            Property {
+                type_name: type_info[2].to_owned(),
+                is_array: true,
+                name,
+            }
+        } else if (type_info.len() == 3 && type_info[0] == "enum" && type_info[1] == "of")
+            || (&type_info[1..]).iter().any(|&w| w == "or")
+        {
+            Property {
+                type_name: "object".to_owned(),
+                is_array: false,
+                name,
+            }
+        } else {
+            dbg!(&type_name);
+            panic!("unsupported type");
+        }
+    }
+
+    pub fn rustify_type(&self) -> &str {
+        match self.type_name.as_str() {
+            "integer" => "isize",
+            "boolean" => "bool",
+            "string" => "&str",
+            _ => &self.type_name,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Type {
-    Enum {
-        name: String,
-    },
-    Data {
-        name: String,
-    },
+pub struct Type {
+    name: String,
+    kind: TypeKind,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum TypeKind {
+    Enum,
+    Data,
     Struct {
-        name: String,
         properties: Vec<Property>,
         optional_properties: Vec<Property>,
     },
@@ -43,11 +90,17 @@ pub enum Type {
 
 impl Type {
     pub fn new_enum(name: String) -> Self {
-        Type::Enum { name }
+        Type {
+            name,
+            kind: TypeKind::Enum,
+        }
     }
 
     pub fn new_data(name: String) -> Self {
-        Type::Data { name }
+        Type {
+            name,
+            kind: TypeKind::Data,
+        }
     }
 
     pub fn new_struct(
@@ -55,10 +108,12 @@ impl Type {
         properties: Vec<Property>,
         optional_properties: Vec<Property>,
     ) -> Self {
-        Type::Struct {
+        Type {
             name,
-            properties,
-            optional_properties,
+            kind: TypeKind::Struct {
+                properties,
+                optional_properties,
+            },
         }
     }
 }
