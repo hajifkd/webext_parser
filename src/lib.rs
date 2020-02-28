@@ -35,13 +35,58 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
         let _initial = index;
         while index < api_info.len() && api_info[index].value().name() != "h2" {
             if api_type == api::ApiType::Types {
-                println!("{:?}", parse_type(&api_info[index]).unwrap());
+                println!("{:?}", parse_type(&api_info[index]));
+            } else if api_type == api::ApiType::Methods {
+                //println!("{:?}", parse_type(&api_info[index]).unwrap());
             }
             index += 1;
         }
     }
 
     Ok(())
+}
+
+struct ParsedProp<'a> {
+    type_name: String,
+    val_name: String,
+    optional: bool,
+    desc_col: Option<scraper::ElementRef<'a>>,
+}
+
+fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String> {
+    let tds = tr
+        .children()
+        .filter_map(ElementRef::wrap)
+        .collect::<Vec<_>>();
+    if tds.len() < 2 {
+        return Err(format!("Children tds: {} (must be 3)", tds.len()));
+    }
+
+    let desc_col = if tds.len() == 3 { Some(tds[2]) } else { None };
+
+    let prop_type = tds[0]
+        .text()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let prop_td = tds[1];
+    let optional = prop_td
+        .select(&Selector::parse("span.optional").unwrap())
+        .count()
+        == 1;
+
+    Ok(ParsedProp {
+        type_name: prop_type,
+        val_name: prop_td
+            .text()
+            .nth(if optional { 1 } else { 0 })
+            .ok_or("Invalid structure")?
+            .trim()
+            .to_owned(),
+        optional,
+        desc_col: desc_col,
+    })
 }
 
 fn parse_type(type_div: &scraper::ElementRef) -> Result<api::Type, String> {
@@ -72,47 +117,16 @@ fn parse_type(type_div: &scraper::ElementRef) -> Result<api::Type, String> {
             let mut properties = vec![];
             let mut optional_properties = vec![];
             for tr in type_div.select(&properties_selector) {
-                let tds = tr
-                    .children()
-                    .filter_map(ElementRef::wrap)
-                    .collect::<Vec<_>>();
+                let prop = parse_prop(tr)?;
 
-                if tds.len() != 3 {
-                    return Err(format!("Children tds: {} (must be 3)", tds.len()));
+                if prop.desc_col.is_none() {
+                    return Err("Children tds must be 3".to_owned());
                 }
 
-                let prop_type = tds[0]
-                    .text()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let prop_td = tds[1];
-
-                if prop_td
-                    .select(&Selector::parse("span.optional").unwrap())
-                    .count()
-                    == 1
-                {
-                    optional_properties.push(api::Property::new(
-                        prop_type,
-                        prop_td
-                            .text()
-                            .nth(1)
-                            .ok_or("Invalid structure")?
-                            .trim()
-                            .to_owned(),
-                    ));
+                if prop.optional {
+                    optional_properties.push(api::Property::new(prop.type_name, prop.val_name));
                 } else {
-                    properties.push(api::Property::new(
-                        prop_type,
-                        prop_td
-                            .text()
-                            .next()
-                            .ok_or("Invalid structure")?
-                            .trim()
-                            .to_owned(),
-                    ));
+                    properties.push(api::Property::new(prop.type_name, prop.val_name));
                 }
             }
             Ok(api::Type::new_struct(name, properties, optional_properties))
@@ -124,3 +138,11 @@ fn parse_type(type_div: &scraper::ElementRef) -> Result<api::Type, String> {
         _ => Err("Invalid type".to_owned()),
     }
 }
+
+/*fn parse_method_body(args_tbody: &scraper::ElementRef) -> Result<Vec<api::Argument>, String> {
+    for tr in args_tbody
+        .children()
+        .filter_map(ElementRef::wrap)
+        .filter(|&e| e.value().id().is_some())
+    {}
+}*/

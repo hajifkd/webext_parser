@@ -117,3 +117,21 @@ impl Type {
         }
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Argument {
+    kind: ArgumentKind,
+    optioned: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ArgumentKind {
+    Property { property: Property },
+    Method { method: Method },
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Method {
+    name: String,
+    args: Vec<Argument>,
+}
