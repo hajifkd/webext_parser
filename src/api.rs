@@ -124,14 +124,36 @@ pub struct Argument {
     optioned: bool,
 }
 
+impl Argument {
+    pub fn new_property(property: Property, optioned: bool) -> Argument {
+        Argument {
+            kind: ArgumentKind::Property { property },
+            optioned,
+        }
+    }
+
+    pub fn new_callback(callback: Method, optioned: bool) -> Argument {
+        Argument {
+            kind: ArgumentKind::Callback { callback },
+            optioned,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ArgumentKind {
     Property { property: Property },
-    Method { method: Method },
+    Callback { callback: Method },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Method {
     name: String,
     args: Vec<Argument>,
+}
+
+impl Method {
+    pub fn new(name: String, args: Vec<Argument>) -> Method {
+        Method { name, args }
+    }
 }
