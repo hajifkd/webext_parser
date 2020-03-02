@@ -38,6 +38,14 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
                 println!("{:?}", parse_type(api_info[index]).unwrap());
             } else if api_type == api::ApiType::Methods {
                 println!("{:?}", parse_method(api_info[index], "h3").unwrap());
+            } else if api_type == api::ApiType::Events {
+                let event = parse_event(api_info[index]);
+                if let Ok(e) = event {
+                    println!("{:?}", e);
+                } else {
+                    println!("Unsupported event found in {}: {:?}", url, event);
+                    println!("{}", api_info[index].inner_html());
+                }
             }
             index += 1;
         }
@@ -89,19 +97,17 @@ fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String>
     })
 }
 
-fn parse_name(div: scraper::ElementRef, title_class: &str) -> Result<String, String> {
-    let name_selector = Selector::parse(&format!(r#"{}"#, title_class)).unwrap();
-    Ok(div
-        .select(&name_selector)
-        .next()
-        .ok_or("Invalid name structure")?
-        .inner_html()
-        .trim()
-        .to_owned())
+fn parse_name(div: scraper::ElementRef, title_selector: &str) -> Result<String, String> {
+    let name_selector = Selector::parse(&format!(r#"{}"#, title_selector)).unwrap();
+    match util::take_one(div.select(&name_selector)) {
+        util::TakeResult::One(e) => Ok(e.inner_html().trim().to_owned()),
+        util::TakeResult::Zero => Err("No name found".to_owned()),
+        util::TakeResult::More => Err("Multiple names found".to_owned()),
+    }
 }
 
 fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
-    let name = parse_name(type_div, "h3")?;
+    let name = parse_name(type_div, r#"h3[id^="type-"]"#)?;
     let tr_selector = Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr"#).unwrap();
     let trs = type_div.select(&tr_selector).collect::<Vec<_>>();
     if trs.len() == 0 {
@@ -116,13 +122,14 @@ fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
 
     while index < trs.len() {
         let tr = trs[index];
-        let prop_type = tr
-            .children()
-            .filter_map(ElementRef::wrap)
-            .filter(|e| e.value().name() == "th")
-            .next()
-            .ok_or("Invalid type header")?
-            .inner_html();
+        let prop_type = match util::take_one(
+            tr.children()
+                .filter_map(ElementRef::wrap)
+                .filter(|e| e.value().name() == "th"),
+        ) {
+            util::TakeResult::One(e) => e.inner_html(),
+            _ => return Err("Invalid type header".to_owned()),
+        };
         let prop_type = prop_type.trim();
         index += 1;
         let start_index = index;
@@ -154,37 +161,42 @@ fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
             }
             "methods" => {
                 for tr in &trs[start_index..index] {
-                    let method_div = tr
-                        .children()
-                        .filter_map(ElementRef::wrap)
-                        .filter(|e| e.value().name() == "td")
-                        .next()
-                        .and_then(|td| {
+                    let method_div = match util::take_one(
+                        tr.children()
+                            .filter_map(ElementRef::wrap)
+                            .filter(|e| e.value().name() == "td"),
+                    ) {
+                        util::TakeResult::One(td) => match util::take_one(
                             td.children()
                                 .filter_map(ElementRef::wrap)
-                                .filter(|e| e.value().name() == "div")
-                                .next()
-                        })
-                        .ok_or("Invalid method structure in Type")?;
+                                .filter(|e| e.value().name() == "div"),
+                        ) {
+                            util::TakeResult::One(div) => div,
+                            _ => return Err("div not found in Type".to_owned()),
+                        },
+                        _ => return Err("td not found in Type".to_owned()),
+                    };
                     methods.push(parse_method(method_div, "h4")?);
                 }
             }
             "events" => {
                 for tr in &trs[start_index..index] {
-                    let event_div = tr
-                        .children()
-                        .filter_map(ElementRef::wrap)
-                        .filter(|e| e.value().name() == "td")
-                        .next()
-                        .and_then(|td| {
+                    let event_div = match util::take_one(
+                        tr.children()
+                            .filter_map(ElementRef::wrap)
+                            .filter(|e| e.value().name() == "td"),
+                    ) {
+                        util::TakeResult::One(td) => match util::take_one(
                             td.children()
                                 .filter_map(ElementRef::wrap)
-                                .filter(|e| e.value().name() == "div")
-                                .next()
-                        })
-                        .ok_or("Invalid structure in Event")?;
-                    dbg!(event_div.inner_html());
-                    events.push(parse_event(event_div)?);
+                                .filter(|e| e.value().name() == "div"),
+                        ) {
+                            util::TakeResult::One(div) => div,
+                            _ => return Err("div not found in Event".to_owned()),
+                        },
+                        _ => return Err("td not found in Event".to_owned()),
+                    };
+                    events.push(parse_inner_event(event_div)?);
                 }
             }
             _ => return Err("Invalid type".to_owned()),
@@ -201,6 +213,12 @@ fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
 }
 
 fn parse_event(event_div: scraper::ElementRef) -> Result<api::Event, String> {
+    let method = parse_method(event_div, "div.description > div > h4")?;
+    let name = parse_name(event_div, r#"h3[id^="event-"]"#)?;
+    Ok(api::Event::new(name, method))
+}
+
+fn parse_inner_event(event_div: scraper::ElementRef) -> Result<api::Event, String> {
     let method = parse_method(event_div, "h4")?;
     let name_selector = Selector::parse("div.summary > code.prettyprint").unwrap();
     let name = event_div
@@ -216,18 +234,21 @@ fn parse_event(event_div: scraper::ElementRef) -> Result<api::Event, String> {
     Ok(api::Event::new(name, method))
 }
 
-fn parse_method(method_div: scraper::ElementRef, title_class: &str) -> Result<api::Method, String> {
-    let name = parse_name(method_div, title_class)?;
+fn parse_method(
+    method_div: scraper::ElementRef,
+    title_selector: &str,
+) -> Result<api::Method, String> {
+    let name = parse_name(method_div, title_selector)?;
     let tbody_selector = Selector::parse(&format!(
         r#"{} ~ div.description > table > tbody"#,
-        title_class
+        title_selector
     ))
     .unwrap();
 
-    let arguments = if let Some(tbody) = method_div.select(&tbody_selector).next() {
-        parse_method_body(tbody)?
-    } else {
-        vec![]
+    let arguments = match util::take_one(method_div.select(&tbody_selector)) {
+        util::TakeResult::Zero => vec![],
+        util::TakeResult::One(e) => parse_method_body(e)?,
+        _ => return Err("Unsupported method len".to_owned()),
     };
 
     Ok(api::Method::new(name, arguments))
@@ -249,17 +270,20 @@ fn parse_method_body(args_tbody: scraper::ElementRef) -> Result<Vec<api::Argumen
                 .children()
                 .filter_map(ElementRef::wrap)
                 .filter(|e| e.value().name() == "table")
-                .filter_map(|t| {
-                    t.children()
-                        .filter_map(ElementRef::wrap)
-                        .filter(|e| e.value().name() == "tbody")
-                        .next()
-                })
-                .next();
-            let callback_args = if let Some(tbody) = tbody {
-                parse_method_body(tbody)?
-            } else {
-                vec![]
+                .map(|t| {
+                    match util::take_one(
+                        t.children()
+                            .filter_map(ElementRef::wrap)
+                            .filter(|e| e.value().name() == "tbody"),
+                    ) {
+                        util::TakeResult::One(e) => e,
+                        _ => panic!("tbody not found in method"),
+                    }
+                });
+            let callback_args = match util::take_one(tbody) {
+                util::TakeResult::Zero => vec![],
+                util::TakeResult::One(tbody) => parse_method_body(tbody)?,
+                _ => return Err("Multiple argument info found".to_owned()),
             };
             let method = api::Method::new(raw_prop.val_name, callback_args);
             api::Argument::new_callback(method, raw_prop.optional)

@@ -31,3 +31,21 @@ pub(crate) async fn get_cached(url: &str) -> io::Result<String> {
         Ok(html)
     }
 }
+
+pub(crate) enum TakeResult<T> {
+    Zero,
+    One(T),
+    More,
+}
+
+pub(crate) fn take_one<T>(iter: impl Iterator<Item = T>) -> TakeResult<T> {
+    let mut v = iter.collect::<Vec<_>>();
+
+    if v.len() == 0 {
+        TakeResult::Zero
+    } else if v.len() == 1 {
+        TakeResult::One(v.remove(0))
+    } else {
+        TakeResult::More
+    }
+}

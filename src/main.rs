@@ -3,7 +3,7 @@ use webext_parser;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (space, url) in webext_parser::api_pages().await?.iter() {
-        /*if space != "devtools.inspectedWindow" {
+        /*if space != "fileSystemProvider" {
             continue;
         }*/
         println!("{}", space);
