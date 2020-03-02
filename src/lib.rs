@@ -29,15 +29,15 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     while index < api_info.len() {
         let title = api_info[index].value();
-        let api_type = api::ApiType::try_from(title.id().ok_or("Invalid structure")?)?;
+        let api_type = api::ApiType::try_from(title.id().ok_or("Invalid API structure")?)?;
         println!("{:?}", &api_type);
         index += 1;
         let _initial = index;
         while index < api_info.len() && api_info[index].value().name() != "h2" {
             if api_type == api::ApiType::Types {
-                println!("{:?}", parse_type(api_info[index]));
+                println!("{:?}", parse_type(api_info[index]).unwrap());
             } else if api_type == api::ApiType::Methods {
-                println!("{:?}", parse_method(api_info[index]).unwrap());
+                println!("{:?}", parse_method(api_info[index], "h3").unwrap());
             }
             index += 1;
         }
@@ -81,7 +81,7 @@ fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String>
         val_name: prop_td
             .text()
             .nth(if optional { 1 } else { 0 })
-            .ok_or("Invalid structure")?
+            .ok_or("Invalid property structure")?
             .trim()
             .to_owned(),
         optional,
@@ -89,64 +89,140 @@ fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String>
     })
 }
 
-fn parse_name(div: scraper::ElementRef, suffix: &str) -> Result<String, String> {
-    let name_selector = Selector::parse(&format!(r#"h3[id^="{}-"]"#, suffix)).unwrap();
+fn parse_name(div: scraper::ElementRef, title_class: &str) -> Result<String, String> {
+    let name_selector = Selector::parse(&format!(r#"{}"#, title_class)).unwrap();
     Ok(div
         .select(&name_selector)
         .next()
-        .ok_or("Invalid structure")?
+        .ok_or("Invalid name structure")?
         .inner_html()
         .trim()
         .to_owned())
 }
 
 fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
-    let name = parse_name(type_div, "type")?;
-    let type_selector = Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr > th"#).unwrap();
-    let type_type = {
-        if let Some(th) = type_div.select(&type_selector).next() {
-            th.inner_html()
-        } else {
-            return Ok(api::Type::new_data(name));
+    let name = parse_name(type_div, "h3")?;
+    let tr_selector = Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr"#).unwrap();
+    let trs = type_div.select(&tr_selector).collect::<Vec<_>>();
+    if trs.len() == 0 {
+        return Ok(api::Type::new_data(name));
+    }
+
+    let mut index = 0;
+    let mut methods = vec![];
+    let mut properties = vec![];
+    let mut optional_properties = vec![];
+    let mut events = vec![];
+
+    while index < trs.len() {
+        let tr = trs[index];
+        let prop_type = tr
+            .children()
+            .filter_map(ElementRef::wrap)
+            .filter(|e| e.value().name() == "th")
+            .next()
+            .ok_or("Invalid type header")?
+            .inner_html();
+        let prop_type = prop_type.trim();
+        index += 1;
+        let start_index = index;
+        while index < trs.len()
+            && trs[index]
+                .children()
+                .filter_map(ElementRef::wrap)
+                .filter(|e| e.value().name() == "th")
+                .count()
+                == 0
+        {
+            index += 1;
         }
-    };
-    let type_type = type_type.trim();
 
-    match type_type {
-        "Enum" => Ok(api::Type::new_enum(name)),
-        "properties" => {
-            let properties_selector =
-                Selector::parse(r#"h3[id^="type-"] ~ table > tbody > tr[id^="property-"]"#)
-                    .unwrap();
-            let mut properties = vec![];
-            let mut optional_properties = vec![];
-            for tr in type_div.select(&properties_selector) {
-                let prop = parse_prop(tr)?;
-
-                if prop.desc_col.is_none() {
-                    return Err("Children tds must be 3".to_owned());
-                }
-
-                if prop.optional {
-                    optional_properties.push(api::Property::new(prop.type_name, prop.val_name));
-                } else {
-                    properties.push(api::Property::new(prop.type_name, prop.val_name));
+        match prop_type {
+            "Enum" => return Ok(api::Type::new_enum(name)),
+            "properties" => {
+                for tr in &trs[start_index..index] {
+                    let prop = parse_prop(*tr)?;
+                    if prop.desc_col.is_none() {
+                        return Err("Children tds must be 3".to_owned());
+                    }
+                    if prop.optional {
+                        optional_properties.push(api::Property::new(prop.type_name, prop.val_name));
+                    } else {
+                        properties.push(api::Property::new(prop.type_name, prop.val_name));
+                    }
                 }
             }
-            Ok(api::Type::new_struct(name, properties, optional_properties))
+            "methods" => {
+                for tr in &trs[start_index..index] {
+                    let method_div = tr
+                        .children()
+                        .filter_map(ElementRef::wrap)
+                        .filter(|e| e.value().name() == "td")
+                        .next()
+                        .and_then(|td| {
+                            td.children()
+                                .filter_map(ElementRef::wrap)
+                                .filter(|e| e.value().name() == "div")
+                                .next()
+                        })
+                        .ok_or("Invalid method structure in Type")?;
+                    methods.push(parse_method(method_div, "h4")?);
+                }
+            }
+            "events" => {
+                for tr in &trs[start_index..index] {
+                    let event_div = tr
+                        .children()
+                        .filter_map(ElementRef::wrap)
+                        .filter(|e| e.value().name() == "td")
+                        .next()
+                        .and_then(|td| {
+                            td.children()
+                                .filter_map(ElementRef::wrap)
+                                .filter(|e| e.value().name() == "div")
+                                .next()
+                        })
+                        .ok_or("Invalid structure in Event")?;
+                    dbg!(event_div.inner_html());
+                    events.push(parse_event(event_div)?);
+                }
+            }
+            _ => return Err("Invalid type".to_owned()),
         }
-        "methods" => {
-            // TODO
-            Ok(api::Type::new_struct(name, vec![], vec![]))
-        }
-        _ => Err("Invalid type".to_owned()),
     }
+
+    Ok(api::Type::new_struct(
+        name,
+        properties,
+        optional_properties,
+        methods,
+        events,
+    ))
 }
 
-fn parse_method(method_div: scraper::ElementRef) -> Result<api::Method, String> {
-    let name = parse_name(method_div, "method")?;
-    let tbody_selector =
-        Selector::parse(r#"h3[id^="method-"] ~ div.description > table > tbody"#).unwrap();
+fn parse_event(event_div: scraper::ElementRef) -> Result<api::Event, String> {
+    let method = parse_method(event_div, "h4")?;
+    let name_selector = Selector::parse("div.summary > code.prettyprint").unwrap();
+    let name = event_div
+        .select(&name_selector)
+        .next()
+        .ok_or("Invalid event name structure".to_owned())?
+        .inner_html()
+        .trim()
+        .split('.')
+        .next()
+        .ok_or("Invalid event code structure".to_owned())?
+        .to_owned();
+    Ok(api::Event::new(name, method))
+}
+
+fn parse_method(method_div: scraper::ElementRef, title_class: &str) -> Result<api::Method, String> {
+    let name = parse_name(method_div, title_class)?;
+    let tbody_selector = Selector::parse(&format!(
+        r#"{} ~ div.description > table > tbody"#,
+        title_class
+    ))
+    .unwrap();
 
     let arguments = if let Some(tbody) = method_div.select(&tbody_selector).next() {
         parse_method_body(tbody)?

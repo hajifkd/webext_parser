@@ -85,6 +85,8 @@ enum TypeKind {
     Struct {
         properties: Vec<Property>,
         optional_properties: Vec<Property>,
+        methods: Vec<Method>,
+        events: Vec<Event>,
     },
 }
 
@@ -107,12 +109,16 @@ impl Type {
         name: String,
         properties: Vec<Property>,
         optional_properties: Vec<Property>,
+        methods: Vec<Method>,
+        events: Vec<Event>,
     ) -> Self {
         Type {
             name,
             kind: TypeKind::Struct {
                 properties,
                 optional_properties,
+                methods,
+                events,
             },
         }
     }
@@ -155,5 +161,20 @@ pub struct Method {
 impl Method {
     pub fn new(name: String, args: Vec<Argument>) -> Method {
         Method { name, args }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Event {
+    event_name: String,
+    add_listener: Method,
+}
+
+impl Event {
+    pub fn new(event_name: String, add_listener: Method) -> Event {
+        Event {
+            event_name,
+            add_listener,
+        }
     }
 }
