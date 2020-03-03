@@ -178,3 +178,31 @@ impl Event {
         }
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Property {
+    name: String,
+    kind: PropertyKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PropertyKind {
+    Immediate { type_name: String },
+    Object { methods: Vec<Method> },
+}
+
+impl Property {
+    pub fn new_immediate(name: String, type_name: String) -> Property {
+        Property {
+            name,
+            kind: PropertyKind::Immediate { type_name },
+        }
+    }
+
+    pub fn new_object(name: String, methods: Vec<Method>) -> Property {
+        Property {
+            name,
+            kind: PropertyKind::Object { methods },
+        }
+    }
+}

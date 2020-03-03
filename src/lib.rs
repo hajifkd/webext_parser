@@ -47,6 +47,8 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
                     println!("{}", api_info[index].inner_html());
                 }
             } else if api_type == api::ApiType::Properties {
+                assert_eq!(api_info[index].value().name(), "table");
+                println!("{:?}", parse_properties(api_info[index]).unwrap());
             }
             index += 1;
         }
@@ -149,14 +151,14 @@ fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
             "Enum" => return Ok(api::Type::new_enum(name)),
             "properties" => {
                 for tr in &trs[start_index..index] {
-                    let prop = parse_elem(*tr)?;
-                    if prop.desc_col.is_none() {
+                    let elem = parse_elem(*tr)?;
+                    if elem.desc_col.is_none() {
                         return Err("Children tds must be 3".to_owned());
                     }
-                    if prop.optional {
-                        optional_properties.push(api::Element::new(prop.type_name, prop.val_name));
+                    if elem.optional {
+                        optional_properties.push(api::Element::new(elem.type_name, elem.val_name));
                     } else {
-                        properties.push(api::Element::new(prop.type_name, prop.val_name));
+                        properties.push(api::Element::new(elem.type_name, elem.val_name));
                     }
                 }
             }
@@ -262,10 +264,10 @@ fn parse_method_body(args_tbody: scraper::ElementRef) -> Result<Vec<api::Argumen
         .filter_map(ElementRef::wrap)
         .filter(|&e| e.value().id().is_some())
     {
-        let raw_prop = parse_elem(tr)?;
+        let elem = parse_elem(tr)?;
 
-        let arg = if raw_prop.type_name == "function" {
-            let tbody = raw_prop
+        let arg = if elem.type_name == "function" {
+            let tbody = elem
                 .desc_col
                 .ok_or("No info for callback found".to_owned())?
                 .children()
@@ -286,14 +288,98 @@ fn parse_method_body(args_tbody: scraper::ElementRef) -> Result<Vec<api::Argumen
                 util::TakeResult::One(tbody) => parse_method_body(tbody)?,
                 _ => return Err("Multiple argument info found".to_owned()),
             };
-            let method = api::Method::new(raw_prop.val_name, callback_args);
-            api::Argument::new_callback(method, raw_prop.optional)
+            let method = api::Method::new(elem.val_name, callback_args);
+            api::Argument::new_callback(method, elem.optional)
         } else {
-            let element = api::Element::new(raw_prop.type_name, raw_prop.val_name);
-            api::Argument::new_element(element, raw_prop.optional)
+            let element = api::Element::new(elem.type_name, elem.val_name);
+            api::Argument::new_element(element, elem.optional)
         };
 
         result.push(arg);
+    }
+
+    Ok(result)
+}
+
+fn parse_properties(prop_table: scraper::ElementRef) -> Result<Vec<api::Property>, String> {
+    let tbody = match util::take_one(prop_table.children().filter_map(ElementRef::wrap)) {
+        util::TakeResult::One(tbody) => tbody,
+        util::TakeResult::More => return Err("Multiple tbody found in Properties".to_owned()),
+        util::TakeResult::Zero => return Err("No tbody found in Properties".to_owned()),
+    };
+
+    let mut result = vec![];
+
+    for tr in tbody.children().filter_map(ElementRef::wrap) {
+        let elem = parse_elem(tr)?;
+        if elem.optional {
+            return Err("Properties cannot be optional".to_owned());
+        }
+        if elem.type_name != "object" {
+            let type_name = if elem
+                .type_name
+                .chars()
+                .next()
+                .map(|c| !c.is_ascii_alphabetic())
+                .unwrap_or(false)
+            {
+                if elem.type_name.contains('.') {
+                    "number"
+                } else {
+                    "integer"
+                }
+            } else {
+                &elem.type_name
+            };
+
+            result.push(api::Property::new_immediate(
+                elem.val_name,
+                type_name.to_owned(),
+            ));
+        } else {
+            if let Some(td) = elem.desc_col {
+                let tbody = match util::take_one(
+                    td.children()
+                        .filter_map(ElementRef::wrap)
+                        .filter(|e| e.value().name() == "table")
+                        .flat_map(|t| {
+                            t.children()
+                                .filter_map(ElementRef::wrap)
+                                .filter(|e| e.value().name() == "tbody")
+                        }),
+                ) {
+                    util::TakeResult::One(td) => td,
+                    util::TakeResult::Zero => {
+                        panic!("no table found");
+                        // result.push(api::Property::new_immediate(elem.val_name, elem.type_name));
+                        // continue;
+                    }
+                    util::TakeResult::More => {
+                        panic!("too many table found");
+                    }
+                };
+
+                let mut methods = vec![];
+                let mut flag = false;
+                for tr in tbody.children().filter_map(ElementRef::wrap) {
+                    let method = parse_method(tr, r#"h3[id^="method-"]"#);
+                    if method.is_err() {
+                        flag = true;
+                        break;
+                    }
+                    methods.push(method.unwrap());
+                }
+
+                if flag {
+                    result.push(api::Property::new_immediate(elem.val_name, elem.type_name));
+                    continue;
+                }
+
+                result.push(api::Property::new_object(elem.val_name, methods));
+            } else {
+                result.push(api::Property::new_immediate(elem.val_name, elem.type_name));
+            }
+        }
     }
 
     Ok(result)
