@@ -21,13 +21,13 @@ impl std::convert::TryFrom<&str> for ApiType {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Property {
+pub struct Element {
     type_name: String,
     is_array: bool,
     name: String,
 }
 
-impl Property {
+impl Element {
     pub fn new(type_name: String, name: String) -> Self {
         let type_info: Vec<_> = type_name.split(" ").collect();
 
@@ -37,13 +37,13 @@ impl Property {
         }
 
         if type_info.len() == 1 {
-            Property {
+            Element {
                 type_name: type_name,
                 is_array: false,
                 name,
             }
         } else if type_info.len() == 3 && type_info[0] == "array" && type_info[1] == "of" {
-            Property {
+            Element {
                 type_name: type_info[2].to_owned(),
                 is_array: true,
                 name,
@@ -51,7 +51,7 @@ impl Property {
         } else if (type_info.len() == 3 && type_info[0] == "enum" && type_info[1] == "of")
             || (&type_info[1..]).iter().any(|&w| w == "or")
         {
-            Property {
+            Element {
                 type_name: "object".to_owned(),
                 is_array: false,
                 name,
@@ -83,8 +83,8 @@ enum TypeKind {
     Enum,
     Data,
     Struct {
-        properties: Vec<Property>,
-        optional_properties: Vec<Property>,
+        properties: Vec<Element>,
+        optional_properties: Vec<Element>,
         methods: Vec<Method>,
         events: Vec<Event>,
     },
@@ -107,8 +107,8 @@ impl Type {
 
     pub fn new_struct(
         name: String,
-        properties: Vec<Property>,
-        optional_properties: Vec<Property>,
+        properties: Vec<Element>,
+        optional_properties: Vec<Element>,
         methods: Vec<Method>,
         events: Vec<Event>,
     ) -> Self {
@@ -131,9 +131,9 @@ pub struct Argument {
 }
 
 impl Argument {
-    pub fn new_property(property: Property, optioned: bool) -> Argument {
+    pub fn new_element(element: Element, optioned: bool) -> Argument {
         Argument {
-            kind: ArgumentKind::Property { property },
+            kind: ArgumentKind::Element { element },
             optioned,
         }
     }
@@ -147,8 +147,8 @@ impl Argument {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ArgumentKind {
-    Property { property: Property },
+enum ArgumentKind {
+    Element { element: Element },
     Callback { callback: Method },
 }
 

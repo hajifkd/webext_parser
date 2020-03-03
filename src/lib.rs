@@ -46,6 +46,7 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
                     println!("Unsupported event found in {}: {:?}", url, event);
                     println!("{}", api_info[index].inner_html());
                 }
+            } else if api_type == api::ApiType::Properties {
             }
             index += 1;
         }
@@ -54,14 +55,14 @@ pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-struct ParsedProp<'a> {
+struct ParsedElem<'a> {
     type_name: String,
     val_name: String,
     optional: bool,
     desc_col: Option<scraper::ElementRef<'a>>,
 }
 
-fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String> {
+fn parse_elem<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedElem<'a>, String> {
     let tds = tr
         .children()
         .filter_map(ElementRef::wrap)
@@ -84,12 +85,12 @@ fn parse_prop<'a>(tr: scraper::ElementRef<'a>) -> Result<ParsedProp<'a>, String>
         .count()
         == 1;
 
-    Ok(ParsedProp {
+    Ok(ParsedElem {
         type_name: prop_type,
         val_name: prop_td
             .text()
             .nth(if optional { 1 } else { 0 })
-            .ok_or("Invalid property structure")?
+            .ok_or("Invalid Element structure")?
             .trim()
             .to_owned(),
         optional,
@@ -148,14 +149,14 @@ fn parse_type(type_div: scraper::ElementRef) -> Result<api::Type, String> {
             "Enum" => return Ok(api::Type::new_enum(name)),
             "properties" => {
                 for tr in &trs[start_index..index] {
-                    let prop = parse_prop(*tr)?;
+                    let prop = parse_elem(*tr)?;
                     if prop.desc_col.is_none() {
                         return Err("Children tds must be 3".to_owned());
                     }
                     if prop.optional {
-                        optional_properties.push(api::Property::new(prop.type_name, prop.val_name));
+                        optional_properties.push(api::Element::new(prop.type_name, prop.val_name));
                     } else {
-                        properties.push(api::Property::new(prop.type_name, prop.val_name));
+                        properties.push(api::Element::new(prop.type_name, prop.val_name));
                     }
                 }
             }
@@ -261,7 +262,7 @@ fn parse_method_body(args_tbody: scraper::ElementRef) -> Result<Vec<api::Argumen
         .filter_map(ElementRef::wrap)
         .filter(|&e| e.value().id().is_some())
     {
-        let raw_prop = parse_prop(tr)?;
+        let raw_prop = parse_elem(tr)?;
 
         let arg = if raw_prop.type_name == "function" {
             let tbody = raw_prop
@@ -288,8 +289,8 @@ fn parse_method_body(args_tbody: scraper::ElementRef) -> Result<Vec<api::Argumen
             let method = api::Method::new(raw_prop.val_name, callback_args);
             api::Argument::new_callback(method, raw_prop.optional)
         } else {
-            let property = api::Property::new(raw_prop.type_name, raw_prop.val_name);
-            api::Argument::new_property(property, raw_prop.optional)
+            let element = api::Element::new(raw_prop.type_name, raw_prop.val_name);
+            api::Argument::new_element(element, raw_prop.optional)
         };
 
         result.push(arg);
