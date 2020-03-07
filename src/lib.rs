@@ -21,40 +21,58 @@ pub async fn api_pages() -> Result<Vec<(String, String)>, Box<dyn std::error::Er
         .collect())
 }
 
-pub async fn parse_apis(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn parse_apis(
+    name: &str,
+    url: &str,
+) -> Result<api::Namespace, Box<dyn std::error::Error>> {
     let api_root = Html::parse_document(&util::get_cached(url).await?);
     let api_selector = Selector::parse("div.api-reference > *").unwrap();
     let api_info = api_root.select(&api_selector).collect::<Vec<_>>();
     let mut index = 0;
+    let mut types = vec![];
+    let mut methods = vec![];
+    let mut events = vec![];
+    let mut properties = vec![];
 
     while index < api_info.len() {
         let title = api_info[index].value();
         let api_type = api::ApiType::try_from(title.id().ok_or("Invalid API structure")?)?;
-        println!("{:?}", &api_type);
         index += 1;
         let _initial = index;
         while index < api_info.len() && api_info[index].value().name() != "h2" {
-            if api_type == api::ApiType::Types {
-                println!("{:?}", parse_type(api_info[index]).unwrap());
-            } else if api_type == api::ApiType::Methods {
-                println!("{:?}", parse_method(api_info[index], "h3").unwrap());
-            } else if api_type == api::ApiType::Events {
-                let event = parse_event(api_info[index]);
-                if let Ok(e) = event {
-                    println!("{:?}", e);
-                } else {
-                    println!("Unsupported event found in {}: {:?}", url, event);
-                    println!("{}", api_info[index].inner_html());
+            match api_type {
+                api::ApiType::Types => {
+                    if let Ok(t) = parse_type(api_info[index]) {
+                        types.push(t);
+                    }
                 }
-            } else if api_type == api::ApiType::Properties {
-                assert_eq!(api_info[index].value().name(), "table");
-                println!("{:?}", parse_properties(api_info[index]).unwrap());
+                api::ApiType::Methods => {
+                    if let Ok(m) = parse_method(api_info[index], "h3") {
+                        methods.push(m);
+                    }
+                }
+                api::ApiType::Events => {
+                    if let Ok(e) = parse_event(api_info[index]) {
+                        events.push(e);
+                    }
+                }
+                api::ApiType::Properties => {
+                    if let Ok(ps) = parse_properties(api_info[index]) {
+                        properties = ps;
+                    }
+                }
             }
             index += 1;
         }
     }
 
-    Ok(())
+    Ok(api::Namespace::new(
+        name.to_owned(),
+        types,
+        properties,
+        methods,
+        events,
+    ))
 }
 
 struct ParsedElem<'a> {

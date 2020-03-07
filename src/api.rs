@@ -1,4 +1,30 @@
 #[derive(Debug, PartialEq, Eq)]
+pub struct Namespace {
+    name: String,
+    types: Vec<Type>,
+    properties: Vec<Property>,
+    methods: Vec<Method>,
+}
+
+impl Namespace {
+    pub fn new(
+        name: String,
+        types: Vec<Type>,
+        mut properties: Vec<Property>,
+        methods: Vec<Method>,
+        events: Vec<Event>,
+    ) -> Self {
+        properties.extend(events.into_iter().map(Event::into));
+        Namespace {
+            name,
+            types,
+            properties,
+            methods,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum ApiType {
     Types,
     Properties,
@@ -175,6 +201,17 @@ impl Event {
         Event {
             event_name,
             add_listener,
+        }
+    }
+}
+
+impl std::convert::Into<Property> for Event {
+    fn into(self) -> Property {
+        Property {
+            name: self.event_name,
+            kind: PropertyKind::Object {
+                methods: vec![self.add_listener],
+            },
         }
     }
 }

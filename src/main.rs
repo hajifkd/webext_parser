@@ -6,8 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         /* if space != "windows" {
             continue;
         } */
-        println!("{}", space);
-        webext_parser::parse_apis(&url).await?;
+        println!("{:?}", webext_parser::parse_apis(&space, &url).await?);
     }
     Ok(())
 }
