@@ -7,7 +7,7 @@ pub struct Namespace {
 }
 
 impl Namespace {
-    pub fn new(
+    pub(crate) fn new(
         name: String,
         types: Vec<Type>,
         mut properties: Vec<Property>,
@@ -22,10 +22,26 @@ impl Namespace {
             methods,
         }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn types(&self) -> &[Type] {
+        &self.types
+    }
+
+    pub fn properties(&self) -> &[Property] {
+        &self.properties
+    }
+
+    pub fn methods(&self) -> &[Method] {
+        &self.methods
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ApiType {
+pub(crate) enum ApiType {
     Types,
     Properties,
     Methods,
@@ -91,10 +107,19 @@ impl Element {
     pub fn rustify_type(&self) -> &str {
         match self.type_name.as_str() {
             "integer" => "isize",
+            "number" => "f64",
             "boolean" => "bool",
             "string" => "&str",
             _ => &self.type_name,
         }
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.is_array
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -105,14 +130,13 @@ pub struct Type {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-enum TypeKind {
+pub enum TypeKind {
     Enum,
     Data,
     Struct {
-        properties: Vec<Element>,
-        optional_properties: Vec<Element>,
+        elements: Vec<Element>,
+        optional_elements: Vec<Element>,
         methods: Vec<Method>,
-        events: Vec<Event>,
     },
 }
 
@@ -131,22 +155,33 @@ impl Type {
         }
     }
 
-    pub fn new_struct(
+    pub(crate) fn new_struct(
         name: String,
-        properties: Vec<Element>,
-        optional_properties: Vec<Element>,
-        methods: Vec<Method>,
+        elements: Vec<Element>,
+        optional_elements: Vec<Element>,
+        mut methods: Vec<Method>,
         events: Vec<Event>,
     ) -> Self {
+        methods.extend(events.into_iter().map(|e| Method {
+            name: format!("{}.{}", e.event_name, e.add_listener.name),
+            args: e.add_listener.args,
+        }));
         Type {
             name,
             kind: TypeKind::Struct {
-                properties,
-                optional_properties,
+                elements,
+                optional_elements,
                 methods,
-                events,
             },
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn kind(&self) -> &TypeKind {
+        &self.kind
     }
 }
 
@@ -170,10 +205,18 @@ impl Argument {
             optioned,
         }
     }
+
+    pub fn is_optional(&self) -> bool {
+        self.optioned
+    }
+
+    pub fn kind(&self) -> &ArgumentKind {
+        &self.kind
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-enum ArgumentKind {
+pub enum ArgumentKind {
     Element { element: Element },
     Callback { callback: Method },
 }
@@ -188,10 +231,18 @@ impl Method {
     pub fn new(name: String, args: Vec<Argument>) -> Method {
         Method { name, args }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn args(&self) -> &[Argument] {
+        &self.args
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Event {
+pub(crate) struct Event {
     event_name: String,
     add_listener: Method,
 }
@@ -223,7 +274,7 @@ pub struct Property {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum PropertyKind {
+pub enum PropertyKind {
     Immediate { type_name: String },
     Object { methods: Vec<Method> },
 }
@@ -241,5 +292,13 @@ impl Property {
             name,
             kind: PropertyKind::Object { methods },
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn kind(&self) -> &PropertyKind {
+        &self.kind
     }
 }
