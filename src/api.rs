@@ -109,7 +109,7 @@ impl Element {
             "integer" => "isize",
             "number" => "f64",
             "boolean" => "bool",
-            "string" => "&str",
+            "string" => "String",
             _ => &self.type_name,
         }
     }
